@@ -1,14 +1,22 @@
 --[[
-	SB <-> JMod Link v7.0
+	SB <-> JMod Link v7.2
 	Двусторонняя перекачка энергии: Spacebuild (energy) <-> JMod (Electricity).
 	Совместимость с CAF (Resource Distribution): Auto Link Tool (rd3_dev_link)
 	умеет подключать JMod-банки к нодам RD-сети.
+
+	ОБНОВЛЕНИЕ v7.2:
+	- SB_JMOD.Identify теперь распознаёт CAF-устройства (storage_energy и любые
+	  другие девайсы Life Support) по факту регистрации в RD-сети
+	  (RD.GetEntityTable), а не только по методам на самой энтити.
+	- Добавлен запасной список префиксов классов Life Support на случай,
+	  если RD ещё не зарегистрировал свежезаспавненное устройство.
+
 	Модули: transfer.lua (насос), rope.lua (трос), caf.lua (мост RD),
 	autolink.lua (патч Auto Link Tool).
 ]]
 
 SB_JMOD = SB_JMOD or {}
-SB_JMOD.Version = "7.0"
+SB_JMOD.Version = "7.2"
 SB_JMOD.Links = SB_JMOD.Links or {}
 SB_JMOD.NextID = SB_JMOD.NextID or 1
 
@@ -198,17 +206,49 @@ if SERVER then
 	CreateConVar("sbjmod_defrate", "50", bit.bor(FCVAR_ARCHIVE, FCVAR_NOTIFY),
 		"Скорость перекачки по умолчанию для Auto Link Tool")
 
+	----------------------------------------------------------------
+	-- КЛАССИФИКАЦИЯ УСТРОЙСТВ
+	----------------------------------------------------------------
+	-- Запасной список префиксов классов Life Support (CAF):
+	-- используется, если RD ещё не зарегистрировал устройство.
+	local CAF_CLASS_PREFIXES = {
+		"storage_", "generator_", "other_", "residue_", "reactor_",
+		"compressor_", "pump_", "valve_", "node_", "resource_",
+	}
+
 	function SB_JMOD.Identify(e)
 		if not IsValid(e) then return nil end
+
+		-- Внешний хук-расширитель (если определён другими модулями)
 		if isfunction(SB_JMOD.IdentifyExt) then
 			local ok, t = pcall(SB_JMOD.IdentifyExt, e)
 			if ok and t then return t end
 		end
+
+		-- JMod: банк ресурса с интерфейсом Electricity
 		local isJMod = isfunction(e.GetElectricity) and isfunction(e.SetElectricity)
+		-- Spacebuild: классический SB-ресурс
 		local isSB = isfunction(e.GetResourceAmount) and isfunction(e.SetResourceAmount)
+
 		if isJMod and isSB then return "both" end
 		if isJMod then return "jmod" end
 		if isSB then return "sb" end
+
+		-- CAF (Resource Distribution): устройство зарегистрировано в RD-сети
+		local okRD, isCAF = pcall(function()
+			if RD and isfunction(RD.GetEntityTable) then
+				return RD.GetEntityTable(e) ~= nil
+			end
+			return false
+		end)
+		if okRD and isCAF then return "caf" end
+
+		-- Запасной вариант: известные классы Life Support
+		local cls = e:GetClass()
+		for _, pref in ipairs(CAF_CLASS_PREFIXES) do
+			if string.find(cls, pref, 1, true) then return "caf" end
+		end
+
 		return nil
 	end
 
