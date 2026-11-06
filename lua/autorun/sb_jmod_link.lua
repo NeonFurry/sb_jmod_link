@@ -1,22 +1,16 @@
 --[[
-	SB <-> JMod Link v7.2
+	SB <-> JMod Link v7.3
 	Двусторонняя перекачка энергии: Spacebuild (energy) <-> JMod (Electricity).
-	Совместимость с CAF (Resource Distribution): Auto Link Tool (rd3_dev_link)
-	умеет подключать JMod-банки к нодам RD-сети.
-
-	ОБНОВЛЕНИЕ v7.2:
-	- SB_JMOD.Identify теперь распознаёт CAF-устройства (storage_energy и любые
-	  другие девайсы Life Support) по факту регистрации в RD-сети
-	  (RD.GetEntityTable), а не только по методам на самой энтити.
-	- Добавлен запасной список префиксов классов Life Support на случай,
-	  если RD ещё не зарегистрировал свежезаспавненное устройство.
-
+	Совместимость с CAF (Resource Distribution): устройства распознаются
+	через RD.GetEntityTable, Auto Link Tool умеет подключать JMod-банки
+	к нодам RD-сети.
 	Модули: transfer.lua (насос), rope.lua (трос), caf.lua (мост RD),
 	autolink.lua (патч Auto Link Tool).
+	Новое в 7.3: R по устройству убирает все его связи.
 ]]
 
 SB_JMOD = SB_JMOD or {}
-SB_JMOD.Version = "7.2"
+SB_JMOD.Version = "7.3"
 SB_JMOD.Links = SB_JMOD.Links or {}
 SB_JMOD.NextID = SB_JMOD.NextID or 1
 
@@ -153,6 +147,20 @@ D.Reload = function(self, tr)
 	if not SERVER then return true end
 	local ply = self:GetOwner()
 	if not IsValid(ply) then return true end
+	local ent = (tr and IsValid(tr.Entity)) and tr.Entity or nil
+
+	if IsValid(ent) and SB_JMOD.Identify(ent) then
+		local n = SB_JMOD.RemoveLinks(ent)
+		if n > 0 then
+			ply:ChatPrint(("[SBJMOD] Убрано связей: %d (%s)."):format(n, ent:GetClass()))
+			return true
+		end
+		SB_JMOD.SelClear(ply)
+		self:SetStage(0)
+		ply:ChatPrint("[SBJMOD] У " .. ent:GetClass() .. " нет связей. Выбор сброшен.")
+		return true
+	end
+
 	SB_JMOD.SelClear(ply)
 	self:SetStage(0)
 	ply:ChatPrint("[SBJMOD] Выбор сброшен.")
@@ -160,7 +168,7 @@ D.Reload = function(self, tr)
 end
 
 D.BuildCPanel = function(CPanel)
-	CPanel:AddControl("Header", { Description = "Двусторонняя перекачка энергии: Spacebuild (energy) <-> JMod (Electricity)." })
+	CPanel:AddControl("Header", { Description = "Двусторонняя перекачка энергии: Spacebuild (energy) <-> JMod (Electricity). R по устройству — убрать его связи." })
 	CPanel:NumSlider("Скорость перекачки, ед/сек", TOOL_MODE .. "_rate", 1, 100000, 0)
 	CPanel:CheckBox("Физический трос", TOOL_MODE .. "_rope")
 	CPanel:NumSlider("Провис троса, ед.", TOOL_MODE .. "_sag", 0, 100, 0)
@@ -206,30 +214,14 @@ if SERVER then
 	CreateConVar("sbjmod_defrate", "50", bit.bor(FCVAR_ARCHIVE, FCVAR_NOTIFY),
 		"Скорость перекачки по умолчанию для Auto Link Tool")
 
-	----------------------------------------------------------------
-	-- КЛАССИФИКАЦИЯ УСТРОЙСТВ
-	----------------------------------------------------------------
-	-- Запасной список префиксов классов Life Support (CAF):
-	-- используется, если RD ещё не зарегистрировал устройство.
-	local CAF_CLASS_PREFIXES = {
-		"storage_", "generator_", "other_", "residue_", "reactor_",
-		"compressor_", "pump_", "valve_", "node_", "resource_",
-	}
-
 	function SB_JMOD.Identify(e)
 		if not IsValid(e) then return nil end
-
-		-- Внешний хук-расширитель (если определён другими модулями)
 		if isfunction(SB_JMOD.IdentifyExt) then
 			local ok, t = pcall(SB_JMOD.IdentifyExt, e)
 			if ok and t then return t end
 		end
-
-		-- JMod: банк ресурса с интерфейсом Electricity
 		local isJMod = isfunction(e.GetElectricity) and isfunction(e.SetElectricity)
-		-- Spacebuild: классический SB-ресурс
 		local isSB = isfunction(e.GetResourceAmount) and isfunction(e.SetResourceAmount)
-
 		if isJMod and isSB then return "both" end
 		if isJMod then return "jmod" end
 		if isSB then return "sb" end
@@ -243,12 +235,12 @@ if SERVER then
 		end)
 		if okRD and isCAF then return "caf" end
 
-		-- Запасной вариант: известные классы Life Support
+		-- Запасной вариант: известные классы Life Support,
+		-- если RD ещё не успел зарегистрировать девайс
 		local cls = e:GetClass()
-		for _, pref in ipairs(CAF_CLASS_PREFIXES) do
+		for _, pref in ipairs({ "storage_", "generator_", "other_", "residue_", "reactor_" }) do
 			if string.find(cls, pref, 1, true) then return "caf" end
 		end
-
 		return nil
 	end
 
@@ -287,15 +279,22 @@ if SERVER then
 		return true, id
 	end
 
-	function SB_JMOD.RemoveEntity(e)
+	function SB_JMOD.RemoveLinks(e)
+		local removed = 0
 		for i = #SB_JMOD.Links, 1, -1 do
 			local l = SB_JMOD.Links[i]
 			if l.a == e or l.b == e then
 				if isfunction(SB_JMOD.RopeRemove) then SB_JMOD.RopeRemove(l) end
 				table.remove(SB_JMOD.Links, i)
+				removed = removed + 1
 			end
 		end
-		SB_JMOD.SyncSoon()
+		if removed > 0 then SB_JMOD.SyncSoon() end
+		return removed
+	end
+
+	function SB_JMOD.RemoveEntity(e)
+		SB_JMOD.RemoveLinks(e)
 	end
 
 	hook.Add("EntityRemoved", "SBJMOD_Cleanup", function(e)
