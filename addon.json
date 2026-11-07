@@ -2,5 +2,6 @@
     "title": "SB <-> JMod Link",
     "type": "tool",
     "tags": ["build", "fun"],
+    "version": "7.3",
     "ignore": ["*.md", "*.zip"]
 }
