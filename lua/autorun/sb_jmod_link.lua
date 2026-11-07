@@ -1,16 +1,18 @@
---[[
-	SB <-> JMod Link v7.3
-	Двусторонняя перекачка энергии: Spacebuild (energy) <-> JMod (Electricity).
+--[[--------------------------------------------------------------------
+	SB <-> JMod Link v7.9
+	Беспроводная перекачка энергии: Spacebuild (energy) <-> JMod (Electricity).
 	Совместимость с CAF (Resource Distribution): устройства распознаются
 	через RD.GetEntityTable, Auto Link Tool умеет подключать JMod-банки
 	к нодам RD-сети.
-	Модули: transfer.lua (насос), rope.lua (трос), caf.lua (мост RD),
-	autolink.lua (патч Auto Link Tool).
-	Новое в 7.3: R по устройству убирает все его связи.
+	Модули: transfer.lua (насос), rope.lua (совместимость, трос отключён),
+	caf.lua (мост RD), autolink.lua (патч Auto Link Tool).
+	Новое в 7.9: чекбокс в меню тула — чёрная плашка с белым текстом
+	«Показывать соединения при наведении» (по умолчанию выключен).
+	Связь невидимая (без кабелей и лучей), зарядка мгновенная.
 ]]
 
 SB_JMOD = SB_JMOD or {}
-SB_JMOD.Version = "7.3"
+SB_JMOD.Version = "7.9"
 SB_JMOD.Links = SB_JMOD.Links or {}
 SB_JMOD.NextID = SB_JMOD.NextID or 1
 
@@ -29,7 +31,7 @@ local D = SB_JMOD.ToolDef
 D.Mode = TOOL_MODE
 D.Category = "Construction"
 D.Name = "SB <-> JMod Link"
-D.ClientConVar = { rate = "50", rope = "1", sag = "10" }
+D.ClientConVar = { hud_links = "0" }
 
 D.Information = {
 	{ name = "left" },
@@ -80,10 +82,7 @@ D.LeftClick = function(self, tr)
 	end
 
 	local target = IsValid(sel.second) and sel.second or ent
-	local ok, msg = SB_JMOD.CreateLink(sel.first, target,
-		self:GetClientNumber("rate", 50),
-		self:GetClientNumber("rope", 1) == 0,
-		self:GetClientNumber("sag", 10))
+	local ok, msg = SB_JMOD.CreateLink(sel.first, target)
 	if ok then
 		ply:ChatPrint("[SBJMOD] Связь создана: " .. sel.first:GetClass() .. " <-> " .. target:GetClass())
 	else
@@ -127,10 +126,7 @@ D.RightClick = function(self, tr)
 		self:SetStage(2)
 		ply:ChatPrint("[SBJMOD] Цель 2: " .. ent:GetClass() .. " — ещё ПКМ для создания связи.")
 	else
-		local ok, msg = SB_JMOD.CreateLink(sel.first, sel.second,
-			self:GetClientNumber("rate", 50),
-			self:GetClientNumber("rope", 1) == 0,
-			self:GetClientNumber("sag", 10))
+		local ok, msg = SB_JMOD.CreateLink(sel.first, sel.second)
 		if ok then
 			ply:ChatPrint("[SBJMOD] Связь создана: " .. sel.first:GetClass() .. " <-> " .. sel.second:GetClass())
 		else
@@ -168,10 +164,27 @@ D.Reload = function(self, tr)
 end
 
 D.BuildCPanel = function(CPanel)
-	CPanel:AddControl("Header", { Description = "Двусторонняя перекачка энергии: Spacebuild (energy) <-> JMod (Electricity). R по устройству — убрать его связи." })
-	CPanel:NumSlider("Скорость перекачки, ед/сек", TOOL_MODE .. "_rate", 1, 100000, 0)
-	CPanel:CheckBox("Физический трос", TOOL_MODE .. "_rope")
-	CPanel:NumSlider("Провис троса, ед.", TOOL_MODE .. "_sag", 0, 100, 0)
+	CPanel:AddControl("Header", { Description = "Беспроводная перекачка энергии: Spacebuild (energy) <-> JMod (Electricity). R по устройству — убрать его связи." })
+	CPanel:AddControl("Label", { Text = "Зарядка: мгновенная (до полного)" })
+
+	-- Чекбокс на чёрной плашке с белым текстом
+	local wrap = vgui.Create("DPanel")
+	wrap:SetTall(34)
+	wrap:DockPadding(8, 5, 8, 5)
+	wrap.Paint = function(_, w, h)
+		draw.RoundedBox(4, 0, 0, w, h, Color(0, 0, 0, 230))
+	end
+
+	local chk = wrap:Add("DCheckBoxLabel")
+	chk:Dock(FILL)
+	chk:SetText("Показывать соединения при наведении")
+	chk:SetTextColor(Color(255, 255, 255, 255))
+	chk:SetFont("DermaDefaultBold")
+	chk:SetConVar(TOOL_MODE .. "_hud_links")
+	chk:SetValue(GetConVar(TOOL_MODE .. "_hud_links") and GetConVar(TOOL_MODE .. "_hud_links"):GetBool() or false)
+
+	CPanel:AddPanel(wrap)
+
 	CPanel:Button("Сбросить выбор", "sbjmod_reset")
 end
 
@@ -210,9 +223,6 @@ if SERVER then
 	AddCSLuaFile("autorun/sb_jmod_link.lua")
 	util.AddNetworkString(NET_NAME)
 	SB_JMOD.NetReady = true
-
-	CreateConVar("sbjmod_defrate", "50", bit.bor(FCVAR_ARCHIVE, FCVAR_NOTIFY),
-		"Скорость перекачки по умолчанию для Auto Link Tool")
 
 	function SB_JMOD.Identify(e)
 		if not IsValid(e) then return nil end
@@ -253,7 +263,7 @@ if SERVER then
 		if IsValid(ply) then ply.SBJMOD_Sel = {} end
 	end
 
-	function SB_JMOD.CreateLink(a, b, rate, norope, sag)
+	function SB_JMOD.CreateLink(a, b)
 		if not IsValid(a) or not IsValid(b) then return false, "объект недействителен" end
 		if a == b then return false, "нельзя связать объект с самим собой" end
 		if not SB_JMOD.Identify(a) then return false, "первый объект — не устройство SB/JMod/CAF" end
@@ -267,9 +277,6 @@ if SERVER then
 		SB_JMOD.NextID = id + 1
 		local l = {
 			id = id, a = a, b = b,
-			rate = rate or 50,
-			norope = norope and true or false,
-			sag = sag or 10,
 			res = "energy",
 		}
 		table.insert(SB_JMOD.Links, l)
@@ -301,6 +308,8 @@ if SERVER then
 		SB_JMOD.RemoveEntity(e)
 	end)
 
+	-- Синхронизация: передаём клиентам список связей (индексы энтити),
+	-- чтобы HUD мог показывать, с чем устройство соединено
 	function SB_JMOD.Sync()
 		if not SB_JMOD.NetReady then return end
 		local n = math.min(#SB_JMOD.Links, 255)
@@ -308,10 +317,8 @@ if SERVER then
 		net.WriteUInt(n, 8)
 		for i = 1, n do
 			local l = SB_JMOD.Links[i]
-			net.WriteUInt(l.id % 65536, 16)
 			net.WriteUInt(l.a:EntIndex() % 65536, 16)
 			net.WriteUInt(l.b:EntIndex() % 65536, 16)
-			net.WriteBool(not l.norope)
 		end
 		net.Broadcast()
 	end
@@ -349,7 +356,7 @@ if SERVER then
 		if not IsValid(sel.first) then ply:ChatPrint("[SBJMOD] Сначала выполните sbjmod_select.") return end
 		local e = ply:GetEyeTrace().Entity
 		if not IsValid(e) then ply:ChatPrint("[SBJMOD] Под прицелом ничего.") return end
-		local ok, msg = SB_JMOD.CreateLink(sel.first, e, 50)
+		local ok, msg = SB_JMOD.CreateLink(sel.first, e)
 		ply:ChatPrint(ok and ("[SBJMOD] Связь создана (#" .. tostring(msg) .. ").")
 			or ("[SBJMOD] Ошибка: " .. tostring(msg)))
 		if ok then SB_JMOD.SelClear(ply) end
@@ -367,10 +374,8 @@ if SERVER then
 		for _, l in ipairs(SB_JMOD.Links) do
 			local ka = SB_JMOD.Identify(l.a) or "?"
 			local kb = SB_JMOD.Identify(l.b) or "?"
-			print(("#%d: %s [%s] <-> %s [%s], %d ед/сек, ресурс %s, %s"):format(
-				l.id, l.a:GetClass(), ka, l.b:GetClass(), kb,
-				l.rate or 50, l.res or "energy",
-				l.norope and "визуальный луч" or "физический трос"))
+			print(("#%d: %s [%s] <-> %s [%s], ресурс %s (беспроводная связь)"):format(
+				l.id, l.a:GetClass(), ka, l.b:GetClass(), kb, l.res or "energy"))
 		end
 	end)
 
@@ -416,35 +421,99 @@ end
 
 if CLIENT then
 	SB_JMOD.ClientLinks = SB_JMOD.ClientLinks or {}
+	SB_JMOD.ClientNet = SB_JMOD.ClientNet or {}
 
+	-- Показ надписи «Соединено:» при наведении. По умолчанию ВЫКЛЮЧЕНА.
+	CreateClientConVar("sb_jmodlink_hud_links", "0", true, false,
+		"Показывать соединения при наведении на устройство (0/1)")
+
+	surface.CreateFont("SBJMOD_LinkHUD", {
+		font = "Tahoma",
+		size = 22,
+		weight = 700,
+		antialias = true,
+	})
+
+	surface.CreateFont("SBJMOD_LinkHUDSmall", {
+		font = "Tahoma",
+		size = 18,
+		weight = 700,
+		antialias = true,
+	})
+
+	-- Приём связей от сервера: строим таблицу «устройство -> список партнёров»
 	net.Receive(NET_NAME, function()
 		local n = net.ReadUInt(8)
-		SB_JMOD.ClientLinks = {}
+		local adj = {}
 		for i = 1, n do
-			local id = net.ReadUInt(16)
 			local ai = net.ReadUInt(16)
 			local bi = net.ReadUInt(16)
-			local rope = net.ReadBool()
-			SB_JMOD.ClientLinks[id] = { a = ai, b = bi, rope = rope, t = CurTime() }
+			adj[ai] = adj[ai] or {}
+			table.insert(adj[ai], bi)
+			adj[bi] = adj[bi] or {}
+			table.insert(adj[bi], ai)
 		end
+		SB_JMOD.ClientNet = adj
 	end)
 
-	local beamMat = Material("tripmine_laser")
+	-- Убираем старые лучи, если остались от прошлых версий
+	hook.Remove("PostDrawTranslucentRenderables", "SBJMOD_Beams")
+	hook.Remove("PostDrawOpaqueRenderables", "SBJMOD_Beams")
 
-	hook.Add("PostDrawTranslucentRenderables", "SBJMOD_Beams", function(bDepth, bSky)
-		if bDepth or bSky then return end
-		local ct = CurTime()
-		for _, l in pairs(SB_JMOD.ClientLinks) do
-			if l.t and (ct - l.t) < (NET_INTERVAL * 2 + 2) and not l.rope then
-				local a, b = Entity(l.a), Entity(l.b)
-				if IsValid(a) and IsValid(b) then
-					local pa = a:LocalToWorld(a:OBBCenter())
-					local pb = b:LocalToWorld(b:OBBCenter())
-					render.SetMaterial(beamMat)
-					render.DrawBeam(pa, pb, 4, 0, 1, Color(80, 180, 255, 200))
+	-- Красивое имя класса: убираем технические префиксы
+	local function PrettifyClass(cls)
+		cls = cls:gsub("^ent_jack_gmod_", ""):gsub("^gmod_", "")
+		cls = cls:gsub("^storage_", ""):gsub("^generator_", "")
+		cls = cls:gsub("^other_", ""):gsub("^residue_", ""):gsub("^reactor_", "")
+		return cls:sub(1, 1):upper() .. cls:sub(2)
+	end
+
+	-- Надпись при наведении: «Соединено:» + список партнёров с количеством.
+	-- Работает только если конвар sb_jmodlink_hud_links = 1.
+	hook.Add("HUDPaint", "SBJMOD_LinkHUD", function()
+		local cv = GetConVar("sb_jmodlink_hud_links")
+		if not cv or not cv:GetBool() then return end
+
+		local ply = LocalPlayer()
+		if not IsValid(ply) then return end
+
+		local e = ply:GetEyeTrace().Entity
+		if not IsValid(e) then return end
+
+		local partners = SB_JMOD.ClientNet[e:EntIndex()]
+		if not partners or #partners == 0 then return end
+
+		-- Считаем партнёров по типам
+		local counts, order = {}, {}
+		for _, idx in ipairs(partners) do
+			local p = Entity(idx)
+			if IsValid(p) then
+				local name = PrettifyClass(p:GetClass())
+				if not counts[name] then
+					counts[name] = 0
+					table.insert(order, name)
 				end
+				counts[name] = counts[name] + 1
 			end
 		end
+
+		if #order == 0 then return end
+
+		local parts = {}
+		for _, name in ipairs(order) do
+			table.insert(parts, name .. " (" .. counts[name] .. ")")
+		end
+
+		local pos = e:LocalToWorld(e:OBBCenter()):ToScreen()
+		if not pos.visible then return end
+
+		local head = "Соединено:"
+		local body = table.concat(parts, " - ")
+
+		draw.SimpleText(head, "SBJMOD_LinkHUDSmall", pos.x, pos.y - 26,
+			Color(120, 220, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		draw.SimpleText(body, "SBJMOD_LinkHUD", pos.x, pos.y,
+			Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 	end)
 
 	concommand.Add("sbjmod_reload_cl", function()
