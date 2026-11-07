@@ -85,6 +85,7 @@ MaxElectricity = 1000
 
 ## Структура аддона
 
-- `lua/autorun/` — ядро: таблица `SB_JMOD`, определение типов устройств.
+- `lua/autorun/` — ядро: таблица
+- `lua/SB_JMOD`, определение типов устройств.
 - `lua/autorun/transfer.lua` — модуль перекачки энергии.
 - `lua/weapons/gmod_tool/stools/` — тул связи.
