@@ -1,12 +1,10 @@
 --[[--------------------------------------------------------------------
-	SB <-> JMod Link :: Transfer (v5.0)
-	Поддержка: JMod, Spacebuild/SB, CAF + FNAF Power system
-	(глобальный пул FNAFPower: Get/Add/GetMax, все fnaf_*-энтити
-	являются окнами в один общий запас энергии).
+	SB <-> JMod Link :: Transfer (v7.3)
+	Поддержка: JMod, Spacebuild/SB, CAF + resource_node (RD-сеть).
 	Роли устройств:
 	  генератор   ("generator", "gen_", "powersource", "reactor")
-	  потребитель (fnaf-устройства, кроме генератора: двери и т.п.)
-	  накопитель  (банки, батареи)
+	  потребитель (turret, sentry)
+	  накопитель  (банки, батареи, resource_node)
 	Правила сети:
 	  генератор -> банк/потребитель : можно
 	  банк <-> банк                 : равный делёж
@@ -19,16 +17,17 @@
 local cvLog = CreateConVar("sbjmod_transferlog", "0", FCVAR_ARCHIVE,
 	"Показывать перекачку энергии в консоли (0/1)")
 
--- FNAF-устройство?
-local function IsFNAF(e)
-	return string.find(string.lower(e:GetClass() or ""), "fnaf", 1, true) ~= nil
+-- resource_node (Resourcer SB3/CAF)? Узел сам не хранит заряд, а является
+-- окном в RD-сеть, поэтому читаем/пишем ресурс через RD.
+local function IsResNode(e)
+	return string.find(string.lower(e:GetClass() or ""), "resource_node", 1, true) ~= nil
 end
 
--- ======== РАСШИРЕНИЕ ЯДРА: fnaf_* устройства ========
+-- ======== РАСШИРЕНИЕ ЯДРА: resource_node ========
 local OriginalIdentify = SB_JMOD.Identify
 SB_JMOD.Identify = function(e)
 	if not IsValid(e) then return nil end
-	if IsFNAF(e) then return "fnaf" end
+	if IsResNode(e) then return "sbres" end
 	local t = OriginalIdentify and OriginalIdentify(e) or nil
 	if t then return t end
 	return nil
@@ -48,8 +47,9 @@ local function GetCharge(e, t)
 		if max <= 0 then max = 1000 end
 		return tonumber(cur) or 0, max
 
-	elseif t == "sb" or t == "caf" then
-		if t == "caf" and RD and isfunction(RD.GetResourceAmount) then
+	elseif t == "sb" or t == "caf" or t == "sbres" then
+		-- Через глобальный RD (Resource Distribution из SB3/CAF)
+		if RD and isfunction(RD.GetResourceAmount) then
 			local ok, cur = pcall(RD.GetResourceAmount, e, "energy")
 			if ok and cur ~= nil then
 				local cap = 10000
@@ -60,6 +60,7 @@ local function GetCharge(e, t)
 				return tonumber(cur) or 0, cap
 			end
 		end
+		-- Запасной вариант: методы на самой энтити
 		local ok, cur = pcall(e.GetResourceAmount, e, "energy")
 		if not ok or cur == nil then return nil end
 		local cap = 10000
@@ -68,20 +69,6 @@ local function GetCharge(e, t)
 			if okc and tonumber(c) and tonumber(c) > 0 then cap = tonumber(c) end
 		end
 		return tonumber(cur) or 0, cap
-
-	elseif t == "fnaf" then
-		-- Все fnaf-энтити читают ОДИН общий пул
-		if FNAFPower and isfunction(FNAFPower.Get) then
-			local ok, cur = pcall(FNAFPower.Get)
-			if ok and cur ~= nil then
-				local cap = 100
-				if FNAFPower.GetMax and isfunction(FNAFPower.GetMax) then
-					local okm, m = pcall(FNAFPower.GetMax)
-					if okm and tonumber(m) and tonumber(m) > 0 then cap = tonumber(m) end
-				end
-				return tonumber(cur) or 0, cap
-			end
-		end
 	end
 
 	return nil
@@ -94,27 +81,12 @@ local function SetCharge(e, t, val)
 		pcall(e.SetElectricity, e, val)
 	elseif t == "sb" then
 		pcall(e.SetResourceAmount, e, "energy", val)
-	elseif t == "caf" then
+	elseif t == "caf" or t == "sbres" then
 		if RD and isfunction(RD.SetResourceAmount) then
 			local ok, _ = pcall(RD.SetResourceAmount, e, "energy", val)
 			if ok then return end
 		end
 		pcall(e.SetResourceAmount, e, "energy", val)
-	elseif t == "fnaf" then
-		if not (FNAFPower and isfunction(FNAFPower.Get)) then return end
-		local ok, cur = pcall(FNAFPower.Get)
-		if not ok or cur == nil then return end
-		cur = tonumber(cur) or 0
-		-- Прямой Set, если автор его предусмотрел
-		if FNAFPower.Set and isfunction(FNAFPower.Set) then
-			pcall(FNAFPower.Set, val)
-		else
-			-- Иначе пишем дельтой через Add
-			local delta = val - cur
-			if delta ~= 0 and FNAFPower.Add and isfunction(FNAFPower.Add) then
-				pcall(FNAFPower.Add, delta)
-			end
-		end
 	end
 end
 
@@ -132,10 +104,7 @@ local function GetRole(e)
 		or string.find(cls, "reactor", 1, true) then
 		return "gen"
 	end
-	-- Все прочие fnaf-устройства — потребители (двери и т.п.)
-	if string.find(cls, "fnaf", 1, true) then
-		return "cons"
-	end
+	-- resource_node и всё прочее — накопители (банки, батареи)
 	return "bank"
 end
 
@@ -223,28 +192,35 @@ concommand.Add("sbjmod_test_energy", function(ply)
 
 	print("[SBJMOD] === Диагностика: " .. e:GetClass() .. " ===")
 	print("Роль: " .. GetRole(e) .. " | Тип: " .. tostring(SB_JMOD.Identify(e)))
-	if IsFNAF(e) then
-		print("FNAF-устройство: общий пул FNAFPower")
-		if FNAFPower then
-			if isfunction(FNAFPower.Get) then
-				local ok, v = pcall(FNAFPower.Get)
-				print("FNAFPower.Get -> " .. tostring(ok and v or ("err:" .. tostring(v))))
-			end
-			if FNAFPower.GetMax and isfunction(FNAFPower.GetMax) then
-				local okm, m = pcall(FNAFPower.GetMax)
-				print("FNAFPower.GetMax -> " .. tostring(okm and m or ("err:" .. tostring(m))))
-			end
-			print("FNAFPower.Set есть: " .. tostring(isfunction(FNAFPower.Set)))
-			print("FNAFPower.Add есть: " .. tostring(isfunction(FNAFPower.Add)))
+
+	if IsResNode(e) then
+		print("resource_node: окно в RD-сеть, ресурс energy")
+		if RD and isfunction(RD.GetResourceAmount) then
+			local ok, v = pcall(RD.GetResourceAmount, e, "energy")
+			print("RD.GetResourceAmount -> ok=" .. tostring(ok) .. " val=" .. tostring(ok and v or ("err:" .. tostring(v))))
 		else
-			print("FNAFPower: глобальной таблицы нет!")
+			print("RD: глобальной таблицы нет!")
+		end
+		if isfunction(e.GetNetworkCapacity) then
+			local okc, c = pcall(e.GetNetworkCapacity, e, "energy")
+			print("GetNetworkCapacity -> ok=" .. tostring(okc) .. " val=" .. tostring(okc and c or ("err:" .. tostring(c))))
+		end
+		if not (RD and isfunction(RD.GetResourceAmount)) then
+			print("Внимание: узел без связи в RD-сети не может обмениваться энергией.")
 		end
 	elseif isfunction(e.GetElectricity) then
 		local ok, v = pcall(e.GetElectricity, e)
 		print("GetElectricity -> ok=" .. tostring(ok) .. " val=" .. tostring(v))
 		print("MaxElectricity = " .. tostring(e.MaxElectricity))
+	elseif isfunction(e.GetResourceAmount) then
+		local ok, v = pcall(e.GetResourceAmount, e, "energy")
+		print("GetResourceAmount(energy) -> ok=" .. tostring(ok) .. " val=" .. tostring(v))
+		if isfunction(e.GetNetworkCapacity) then
+			local okc, c = pcall(e.GetNetworkCapacity, e, "energy")
+			print("GetNetworkCapacity -> ok=" .. tostring(okc) .. " val=" .. tostring(okc and c or ("err:" .. tostring(c))))
+		end
 	end
 	print("[SBJMOD] === Конец диагностики ===")
 end)
 
-print("[SBJMOD] Модуль transfer v5.0 загружен: JMod/SB/CAF + FNAF Power (общий пул)")
+print("[SBJMOD] Модуль transfer v7.3 загружен: JMod/SB/CAF + resource_node (RD-сеть)")
