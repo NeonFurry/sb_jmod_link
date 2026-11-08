@@ -1,5 +1,5 @@
 --[[--------------------------------------------------------------------
-	SB <-> JMod Link v8.2
+	SB <-> JMod Link v8.3
 	Беспроводная перекачка энергии: Spacebuild (energy) <-> JMod (Electricity).
 	Совместимость с CAF (Resource Distribution): устройства распознаются
 	через RD.GetEntityTable, Auto Link Tool умеет подключать JMod-банки
@@ -8,18 +8,20 @@
 	caf.lua (мост RD), autolink.lua (патч Auto Link Tool),
 	fusion.lua (Fusion Generator: без урона, вода, лимиты).
 	Новое в 8.1/8.2: своя Spawnmenu-вкладка «SBJLink» (autorun/client/
-	sb_jmod_tab.lua) — тул + меню Fusion Generator (лимит энергии, ёмкость
-	бака воды, бесконечная вода, без повреждений). Из меню тула Fusion-
-	контролы убраны. Правила перекачки: генератор -> банк/потребитель,
-	банк <-> банк 1:1, потребители только принимают. Лимиты воды и энергии
-	реально меняют ёмкости RD3 (юнит + сеть), проверено по исходникам RD.
-	Лимит энергии — ПОТОЛОК сетевой (clamps nettable value);
-	лимит воды — ёмкость бака прибора (не трогает сетевое значение).
-	Связь невидимая (без кабелей и лучей), зарядка мгновенная.
+	sb_jmod_tab.lua) — тул + меню Fusion Generator. Правила перекачки:
+	генератор -> банк/потребитель, банк <-> банк 1:1, потребители только
+	принимают. Лимиты воды и энергии реально меняют ёмкости RD3
+	(юнит + сеть). Связь невидимая (без кабелей и лучей).
+
+	Новое в 8.3: старая команда sbjmod_reload УДАЛЕНА — перезагрузкой
+	занимается только sb_jmod_hotreload.lua (иначе из-за алфавитного
+	порядка autorun ядро перезаписывало умную команду старой).
+	Стартовые print-ы молчат при SB_JMOD.HotReloading (протокол v1.1):
+	на listen-сервере иначе они видны дважды.
 ]]
 
 SB_JMOD = SB_JMOD or {}
-SB_JMOD.Version = "8.2"
+SB_JMOD.Version = "8.3"
 SB_JMOD.Links = SB_JMOD.Links or {}
 SB_JMOD.NextID = SB_JMOD.NextID or 1
 
@@ -386,36 +388,17 @@ if SERVER then
 		end
 	end)
 
-	concommand.Add("sbjmod_reload", function(ply)
-		if IsValid(ply) and not ply:IsAdmin() then
-			ply:ChatPrint("[SBJMOD] Нужны права админа.")
-			return
-		end
+	-- ВАЖНО: команда sbjmod_reload здесь НЕ регистрируется.
+	-- Перезагрузкой занимается только sb_jmod_hotreload.lua (умная,
+	-- с сетевым обновлением клиентов). Две команды с одним именем
+	-- перезаписывали друг друга в зависимости от порядка загрузки
+	-- файлов autorun — отсюда путаница и дубль сообщений.
 
-		local files = {
-			"autorun/sb_jmod_link.lua",
-			"sb_jmod/transfer.lua",
-			"sb_jmod/rope.lua",
-			"sb_jmod/caf.lua",
-			"sb_jmod/autolink.lua",
-			"sb_jmod/fusion.lua",
-		}
-		for _, f in ipairs(files) do
-			local ok, err = pcall(include, f)
-			print(ok and ("[SBJMOD] Перезагрузка: " .. f .. " OK")
-				or ("[SBJMOD] Перезагрузка: " .. f .. " ОШИБКА: " .. tostring(err)))
-		end
-
-		local okT, errT = SB_JMOD.ReloadTool()
-		print(okT and "[SBJMOD] Перезагрузка: тул OK"
-			or ("[SBJMOD] Перезагрузка: тул ОШИБКА: " .. tostring(errT)))
-
-		if IsValid(ply) then
-			ply:ChatPrint("[SBJMOD] Перезагрузка завершена. Теперь sbjmod_reload_cl в своей консоли и тулган в руки заново.")
-		end
-	end)
-
-	print("[SBJMOD] Ядро SB <-> JMod Link v" .. SB_JMOD.Version .. " загружено (server)")
+	-- Стартовый print молчит во время горячей перезагрузки
+	-- (иначе на listen-сервере видно дважды: сервер + клиент)
+	if not SB_JMOD.HotReloading then
+		print("[SBJMOD] Ядро SB <-> JMod Link v" .. SB_JMOD.Version .. " загружено (server)")
+	end
 
 	-- Загрузка модулей (отсутствие файла не роняет ядро)
 	local modules = { "transfer", "rope", "caf", "autolink", "fusion" }
@@ -524,6 +507,8 @@ if CLIENT then
 			Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 	end)
 
+	-- Ручной резерв: горячая перезагрузка по сети обновляет клиентов
+	-- автоматически, эта команда — на случай, если сеть недоступна
 	concommand.Add("sbjmod_reload_cl", function()
 		local ok, err = pcall(include, "autorun/sb_jmod_link.lua")
 		print(ok and "[SBJMOD] Клиент: ядро OK"
@@ -534,5 +519,8 @@ if CLIENT then
 			or ("[SBJMOD] Клиент: тул ОШИБКА: " .. tostring(errT)))
 	end)
 
-	print("[SBJMOD] Ядро SB <-> JMod Link v" .. SB_JMOD.Version .. " загружено (client)")
+	-- Стартовый print молчит во время горячей перезагрузки
+	if not SB_JMOD.HotReloading then
+		print("[SBJMOD] Ядро SB <-> JMod Link v" .. SB_JMOD.Version .. " загружено (client)")
+	end
 end

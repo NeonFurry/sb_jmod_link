@@ -1,5 +1,5 @@
 --[[--------------------------------------------------------------------
-	SB <-> JMod Link :: Fusion Generator (v2.1)
+	SB <-> JMod Link :: Fusion Generator (v2.3)
 	Патч Fusion Generators (generator_energy_fusion) из SpaceBuild /
 	SpaceBuild Life Support по реальной RD3-механике (проверено по
 	исходникам github.com/spacebuild/spacebuild, файл
@@ -58,9 +58,15 @@
 	  sbjmod_fusion_water_limit    — ёмкость бака воды прибора
 	                                 (nettable value воды не трогает;
 	                                 0 = как в моде)
-	  sbjmod_fusion_infinite_water — бесконечная вода (0/1)
-	  sbjmod_fusion_no_damage      — без повреждений (0/1, по умолчанию 1)
+	  sbjmod_fusion_infinite_water — бесконечная вода (0/1, по умолчанию 0)
+	  sbjmod_fusion_no_damage      — без повреждений (0/1, по умолчанию 0:
+	                                 включается ВРУЧНУЮ в вкладке SBJLink)
 	  sbjmod_fusion_match          — доп. подстроки классов, через запятую
+
+	Новое в 2.3: sbjmod_fusion_no_damage по умолчанию «0» (было «1»).
+	ВНИМАНИЕ для обновляющихся: из-за FCVAR_ARCHIVE уже записанное
+	«1» поднимется со старым значением — один раз выполните в консоли
+	сервера: sbjmod_fusion_no_damage 0
 
 	Диагностика: sbjmod_fusion_scan. Управление: вкладка SBJLink.
 --------------------------------------------------------------------]]
@@ -85,8 +91,8 @@ local CV_WATERCAP = CreateConVar("sbjmod_fusion_water_limit", "0",
 local CV_INF = CreateConVar("sbjmod_fusion_infinite_water", "0",
 	FCVAR_ARCHIVE, "Бесконечная вода в Fusion Generators (0/1)")
 
-local CV_NODMG = CreateConVar("sbjmod_fusion_no_damage", "1",
-	FCVAR_ARCHIVE, "Fusion Generators без повреждений (0/1)")
+local CV_NODMG = CreateConVar("sbjmod_fusion_no_damage", "0",
+	FCVAR_ARCHIVE, "Fusion Generators без повреждений (0/1, по умолчанию выключено)")
 
 local CV_MATCH = CreateConVar("sbjmod_fusion_match", "",
 	FCVAR_ARCHIVE, "Дополнительные подстроки в имени класса, через запятую")
@@ -213,7 +219,7 @@ function F.Install(e)
 		return c
 	end
 
-	-- Кламп на САМОМsupply: генератор вырабатывает раз в секунду
+	-- Кламп на самом Supply: генератор вырабатывает раз в секунду
 	-- (init.lua:345 NextThink(CurTime()+1)) по 5000*mult (init.lua:16,
 	-- init.lua:298 SupplyResource("energy", inc)), поэтому 1-секундный
 	-- таймер-кламп ловил передержку до 5000*mult сверх лимита. Теперь
@@ -269,20 +275,32 @@ end)
 
 -- Внутренний урон мода (перегрев/нехватка воды) идёт мимо EntityTakeDamage,
 -- напрямую через CAF Life Support DamageLS — патчим его.
+--
+-- ВАЖНО: в Lua функцию нельзя индексировать (ls.DamageLS.SBJMOD_Patched
+-- даёт «attempt to index field 'DamageLS' (a function value)»), поэтому
+-- флаг «уже пропатчено» держим в локальной переменной LS_PatchRef и
+-- сверяем ССЫЛКУ на функцию. Если Life Support перезагрузится и вернёт
+-- заводскую DamageLS — сравнение не сойдётся и патч накатится заново;
+-- если наш wrapper на месте — выходим, слоёв wrappers не наращиваем.
+local LS_PatchRef = nil
+
 local function PatchDamageLS()
 	if not CAF or not isfunction(CAF.GetAddon) then return false end
 	local ok, ls = pcall(CAF.GetAddon, "Life Support")
 	if not ok or not istable(ls) or not isfunction(ls.DamageLS) then return false end
-	if ls.DamageLS.SBJMOD_Patched then return true end
+
+	if LS_PatchRef and ls.DamageLS == LS_PatchRef then return true end
+
 	local old = ls.DamageLS
 	ls.DamageLS = function(ent, dam)
 		if F.NoDamage() and SB_JMOD.IsFusionGenerator(ent) then return end
 		return old(ent, dam)
 	end
-	ls.DamageLS.SBJMOD_Patched = true
+	LS_PatchRef = ls.DamageLS
 	print("[SBJMOD] Fusion: внутренний урон Life Support.DamageLS перехвачен")
 	return true
 end
+
 timer.Create("SBJMOD_Fusion_PatchLS", 2, 30, function()
 	if PatchDamageLS() then timer.Remove("SBJMOD_Fusion_PatchLS") end
 end)
@@ -557,4 +575,4 @@ concommand.Add("sbjmod_fusion_scan", function(ply)
 		n, F.EnergyLimit(), F.WaterLimit(), tostring(F.InfiniteWater()), tostring(F.NoDamage())))
 end)
 
-print("[SBJMOD] Модуль Fusion Generator v2.1 загружен (server). Ёмкость правится напрямую в ent_table+nettable (RD3)")
+print("[SBJMOD] Модуль Fusion Generator v2.3 загружен (server). Ёмкость правится напрямую в ent_table+nettable (RD3)")
