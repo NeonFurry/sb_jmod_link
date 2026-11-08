@@ -3,6 +3,7 @@
 Беспроводная перекачка энергии между устройствами **JMod** и **SpaceBuild / SpaceBuild 2** в Garry's Mod.
 
 [![Garry's Mod](https://img.shields.io/badge/GMod-1954857229-blue)](https://store.steampowered.com/app/4000/Garrys_Mod/)
+[![License](https://img.shields.io/badge/license-All-Rights-Reserved-grey)](#)
 
 ## ⚡ Что делает
 
@@ -146,4 +147,6 @@ lua/
 
 ## 📄 Лицензия
 
-Все права защищены. Запрещено распространение без разрешения автора.
+MIT License — подробности в файле [LICENSE](LICENSE).
+
+Можно свободно использовать, копировать, изменять и распространять, в том числе в коммерческих целях, с сохранением уведомления об авторских правах.
