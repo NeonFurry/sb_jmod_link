@@ -33,4 +33,6 @@ if SB_JMOD.Links then
 	end
 end
 
-print("[SBJMOD] Модуль rope v5 загружен: физический трос полностью отключён, связь беспроводная")
+if not SB_JMOD.HotReloading then
+	print("[SBJMOD] Модуль rope v5 загружен: физический трос полностью отключён, связь беспроводная")
+end

@@ -2,5 +2,14 @@
     "title": "SB <-> JMod Link",
     "type": "tool",
     "tags": ["build", "fun"],
-    "ignore": ["*.md", "*.zip"]
+    "description": "Беспроводная перекачка энергии между JMod и SpaceBuild/CAF (Resource Distribution), плюс настройка Fusion Generator.",
+    "ignore": [
+        "*.md",
+        "*.zip",
+        "*.bak",
+        "*.broken.*",
+        "*.disabled",
+        ".gigatool/**",
+        ".git/**"
+    ]
 }

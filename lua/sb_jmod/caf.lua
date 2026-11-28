@@ -20,12 +20,17 @@ local function TryInit()
 	C.RD = RD
 	C.Available = true
 
-	SB_JMOD.IdentifyExt = function(e)
-		if not IsValid(e) then return nil end
-		if e.IsNode then return "caf" end
-		local ok2, t = pcall(RD.GetEntityTable, e)
-		if ok2 and istable(t) and t.ent ~= nil then return "caf" end
-		return nil
+	-- Тип «caf» регистрируется в реестре ядра (приоритет 30: после
+	-- fusion и resource_node, но до определения по методам устройства —
+	-- методы JMod важнее, поэтому у них приоритет 40).
+	if isfunction(SB_JMOD.AddIdentifier) then
+		SB_JMOD.AddIdentifier("caf", 30, function(e)
+			if not IsValid(e) then return nil end
+			if e.IsNode then return "caf" end
+			local ok3, t = pcall(RD.GetEntityTable, e)
+			if ok3 and istable(t) and t.ent ~= nil then return "caf" end
+			return nil
+		end)
 	end
 
 	function C.NetID(e)
@@ -80,12 +85,16 @@ local function TryInit()
 		return amount
 	end
 
-	print("[SBJMOD] Модуль CAF: Resource Distribution найден")
+	if not SB_JMOD.HotReloading then
+		print("[SBJMOD] Модуль CAF: Resource Distribution найден")
+	end
 	return true
 end
 
 if not TryInit() then
-	print("[SBJMOD] Модуль CAF: Resource Distribution пока не загружен — жду аддон...")
+	if not SB_JMOD.HotReloading then
+		print("[SBJMOD] Модуль CAF: Resource Distribution пока не загружен — жду аддон...")
+	end
 	timer.Create("SBJMOD_CafInit", 1, 30, function()
 		if TryInit() then timer.Remove("SBJMOD_CafInit") end
 	end)

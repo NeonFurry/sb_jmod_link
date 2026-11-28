@@ -438,4 +438,6 @@ hook.Add("PopulateToolMenu", "SBJMOD_Tab", function()
 		end)
 end)
 
-print("[SBJMOD] Вкладка SBJLink загружена (client)")
+if not SB_JMOD.HotReloading then
+	print("[SBJMOD] Вкладка SBJLink загружена (client)")
+end

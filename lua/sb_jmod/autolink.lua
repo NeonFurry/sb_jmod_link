@@ -1,21 +1,19 @@
 --[[
-	SB <-> JMod Link — совместимость с Auto Link Tool из CAF/RD3 (сервер).
+	SB <-> JMod Link — совместимость с Auto Link Tool из CAF/RD3 (сервер) v9.0.
 	Патчит rd3_dev_link / rd3_dev_link2 / rd3_dev_link3:
 	  - клик по ноде: все JMod-устройства в радиусе ноды получают связь с ней;
 	  - клик по JMod-банку: выбор цели 1, следующий клик — связь;
 	  - ПКМ по JMod-банку: снятие наших связей с ним.
 	Ресурсы RD не трогаем — пулы не смешиваются, двойного счёта нет.
+
+	В 9.0 связи создаются от имени игрока (третий аргумент CreateLink),
+	поэтому права sbjmod_open_links/владение соблюдаются и здесь.
+	Убраны мёртвые аргументы DefRate/false/10 от версии со «скоростью».
 ]]
 
 SB_JMOD.AutoLinkLoaded = true
 
 local RD_MODES = { "rd3_dev_link", "rd3_dev_link2", "rd3_dev_link3" }
-
-local function DefRate()
-	local cv = GetConVar("sbjmod_defrate")
-	if cv then return cv:GetInt() end
-	return 50
-end
 
 local function IsLinkedTo(a, b)
 	for _, l in ipairs(SB_JMOD.Links) do
@@ -48,7 +46,7 @@ function SB_JMOD.AutoLinkHandle(self, tr)
 		local count = 0
 		for _, e in ipairs(ents.FindInSphere(ent:GetPos(), ent.range or 512)) do
 			if IsValid(e) and e ~= ent and SB_JMOD.Identify(e) == "jmod" and not IsLinkedTo(e, ent) then
-				local ok = SB_JMOD.CreateLink(e, ent, DefRate(), false, 10)
+				local ok = SB_JMOD.CreateLink(e, ent, ply)
 				if ok then count = count + 1 end
 			end
 		end
@@ -57,7 +55,7 @@ function SB_JMOD.AutoLinkHandle(self, tr)
 			SB_JMOD.SyncSoon()
 		end
 		if IsValid(sel.first) and SB_JMOD.Identify(sel.first) == "jmod" then
-			local ok, msg = SB_JMOD.CreateLink(sel.first, ent, DefRate(), false, 10)
+			local ok, msg = SB_JMOD.CreateLink(sel.first, ent, ply)
 			ply:ChatPrint(ok and "[SBJMOD] Связь создана." or ("[SBJMOD] Ошибка: " .. tostring(msg)))
 			SB_JMOD.SelClear(ply)
 		end
@@ -73,7 +71,7 @@ function SB_JMOD.AutoLinkHandle(self, tr)
 				" — теперь кликните по ноде или второму устройству.")
 			return true
 		end
-		local ok, msg = SB_JMOD.CreateLink(sel.first, ent, DefRate(), false, 10)
+		local ok, msg = SB_JMOD.CreateLink(sel.first, ent, ply)
 		ply:ChatPrint(ok and "[SBJMOD] Связь создана." or ("[SBJMOD] Ошибка: " .. tostring(msg)))
 		SB_JMOD.SelClear(ply)
 		return true
@@ -81,7 +79,7 @@ function SB_JMOD.AutoLinkHandle(self, tr)
 
 	-- 3) Отложенное JMod-выбрание + клик по RD/SB-устройству
 	if IsValid(sel.first) and SB_JMOD.Identify(sel.first) == "jmod" and (kind == "caf" or kind == "sb") then
-		local ok, msg = SB_JMOD.CreateLink(sel.first, ent, DefRate(), false, 10)
+		local ok, msg = SB_JMOD.CreateLink(sel.first, ent, ply)
 		ply:ChatPrint(ok and "[SBJMOD] Связь создана." or ("[SBJMOD] Ошибка: " .. tostring(msg)))
 		SB_JMOD.SelClear(ply)
 		return true
@@ -119,7 +117,9 @@ local function PatchTool(tool)
 	end
 
 	tool.SBJMOD_Patched = true
-	print("[SBJMOD] Auto Link Tool (" .. tostring(tool.Mode or "?") .. ") теперь совместим с JMod")
+	if not SB_JMOD.HotReloading then
+		print("[SBJMOD] Auto Link Tool (" .. tostring(tool.Mode or "?") .. ") теперь совместим с JMod")
+	end
 	return true
 end
 
